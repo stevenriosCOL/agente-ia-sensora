@@ -26,22 +26,20 @@ class ManyChatService {
     try {
       Logger.info('📤 Enviando a ManyChat', { subscriberId, textLength: text.length });
 
-      // Formato correcto para WhatsApp en ManyChat
-      const payload = {
-        subscriber_id: subscriberId,
-        data: {
-          version: "v2",
-          content: {
-            messages: [
-              {
-                type: "text",
-                text: text
-              }
-            ]
-          }
-        },
-        message_tag: "ACCOUNT_UPDATE"
-      };
+// Formato alternativo sin "content" wrapper
+const payload = {
+  subscriber_id: subscriberId,
+  data: {
+    version: "v2",
+    messages: [
+      {
+        type: "text",
+        text: text
+      }
+    ]
+  },
+  message_tag: "ACCOUNT_UPDATE"
+};
 
       const response = await this.axiosInstance.post('', payload);
 
