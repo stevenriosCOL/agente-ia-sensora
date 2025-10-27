@@ -17,21 +17,16 @@ class ManyChatService {
     });
   }
 
-  /**
-   * Envía un mensaje de texto a ManyChat WhatsApp
-   * Formato EXACTO del JSON de n8n que funciona
-   */
   async sendMessage(subscriberId, text) {
     try {
       Logger.info('📤 Enviando a ManyChat', { subscriberId, textLength: text.length });
 
-      // Formato EXACTO de n8n que funcionaba
       const payload = {
         subscriber_id: subscriberId,
         data: {
           version: "v2",
           content: {
-            type: "whatsapp",  // ← ESTO ERA LO QUE FALTABA
+            type: "whatsapp",
             messages: [
               {
                 type: "text",
@@ -43,6 +38,10 @@ class ManyChatService {
         message_tag: "ACCOUNT_UPDATE"
       };
 
+      // LOG EL PAYLOAD COMPLETO
+      console.log('🔍 PAYLOAD COMPLETO A MANYCHAT:');
+      console.log(JSON.stringify(payload, null, 2));
+
       const response = await this.axiosInstance.post('', payload);
 
       if (response.status === 200) {
@@ -53,11 +52,19 @@ class ManyChatService {
       return { success: false, error: 'Respuesta inesperada de ManyChat' };
 
     } catch (error) {
+      // LOG COMPLETO Y DETALLADO DEL ERROR
+      console.log('❌ ERROR COMPLETO DE MANYCHAT:');
+      console.log('Status:', error.response?.status);
+      console.log('Status Text:', error.response?.statusText);
+      console.log('Data:', JSON.stringify(error.response?.data, null, 2));
+      console.log('Details Messages:', JSON.stringify(error.response?.data?.details?.messages, null, 2));
+      
       Logger.error('❌ Error enviando a ManyChat:', {
         subscriberId,
         error: error.message,
         status: error.response?.status,
-        data: error.response?.data
+        fullError: error.response?.data,
+        detailsMessages: error.response?.data?.details?.messages
       });
 
       return { 
@@ -67,9 +74,6 @@ class ManyChatService {
     }
   }
 
-  /**
-   * Notifica al admin sobre un escalamiento
-   */
   async notifyAdmin(escalationData) {
     try {
       const { subscriberId, nombre, mensaje, timestamp } = escalationData;
