@@ -17,7 +17,8 @@ class ClassifierService {
     try {
       Logger.info('🔍 Clasificando mensaje...', { length: message.length, language });
 
-      const prompt = this.getClassifierPrompt(language);
+      // Prompt EXACTO de n8n (línea 363 del JSON)
+      const prompt = this.getClassifierPrompt();
 
       const completion = await this.openai.chat.completions.create({
         model: config.OPENAI_MODEL_CLASSIFIER,
@@ -46,39 +47,21 @@ class ClassifierService {
   }
 
   /**
-   * Obtiene el prompt del clasificador según idioma
+   * Prompt del clasificador EXACTO de n8n
+   * No tiene variaciones de idioma en n8n, es un solo prompt
    */
-  getClassifierPrompt(language) {
-    const prompts = {
-      es: `Eres un clasificador experto. Analiza el siguiente mensaje y clasifícalo en UNA de estas categorías: VENTAS, SOPORTE, TECNICO, ESCALAMIENTO.
+  getClassifierPrompt() {
+    // PROMPT EXACTO del JSON de n8n (línea 363)
+    return `Clasifica el mensaje del cliente en UNA de estas 4 categorías:
 
-VENTAS: Consultas sobre planes, precios, destinos, compras, información de productos
-SOPORTE: Problemas con órdenes existentes, reembolsos, activación de eSIM, consultas post-compra
-TECNICO: Instalación de eSIM, configuración, problemas de conectividad, compatibilidad de dispositivos
-ESCALAMIENTO: Mensajes confusos, fuera de contexto, solicitudes de hablar con humano, quejas, reclamos
+VENTAS: saludos, planes, precios, destinos, compras, recomendaciones
+SOPORTE: QR no llegó, pagos, reembolsos, órdenes, problemas con compra
+TECNICO: instalación, QR no escanea, sin internet, activación, configuración
+ESCALAMIENTO: necesito humano, hablar con persona, esto no sirve, quiero cancelar, muy frustrado
 
-Responde SOLO con la categoría en mayúsculas, nada más.`,
+Si menciona "humano", "persona real", "agente" o está muy frustrado -> ESCALAMIENTO
 
-      en: `You are an expert classifier. Analyze the following message and classify it into ONE of these categories: VENTAS, SOPORTE, TECNICO, ESCALAMIENTO.
-
-VENTAS: Questions about plans, prices, destinations, purchases, product information
-SOPORTE: Problems with existing orders, refunds, eSIM activation, post-purchase queries
-TECNICO: eSIM installation, configuration, connectivity problems, device compatibility
-ESCALAMIENTO: Confusing messages, out of context, requests to speak with human, complaints
-
-Respond ONLY with the category in uppercase, nothing else.`,
-
-      pt: `Você é um classificador especialista. Analise a seguinte mensagem e classifique-a em UMA destas categorias: VENTAS, SOPORTE, TECNICO, ESCALAMIENTO.
-
-VENTAS: Consultas sobre planos, preços, destinos, compras, informações de produtos
-SOPORTE: Problemas com pedidos existentes, reembolsos, ativação de eSIM, consultas pós-compra
-TECNICO: Instalação de eSIM, configuração, problemas de conectividade, compatibilidade de dispositivos
-ESCALAMIENTO: Mensagens confusas, fora de contexto, solicitações para falar com humano, reclamações
-
-Responda APENAS com a categoria em maiúsculas, nada mais.`
-    };
-
-    return prompts[language] || prompts.es;
+Responde ÚNICAMENTE con una palabra en MAYÚSCULAS: VENTAS, SOPORTE, TECNICO o ESCALAMIENTO`;
   }
 }
 
