@@ -1,18 +1,17 @@
 const express = require('express');
 const router = express.Router();
-const rateLimitService = require('../services/ratelimit.service');
 const classifierService = require('../services/classifier.service');
 const agentsService = require('../services/agents.service');
 const manychatService = require('../services/manychat.service');
 const supabaseService = require('../services/supabase.service');
-const { detectLanguage, getContextualGreeting } = require('../utils/language.util');
-const { sanitizeText, sanitizeEscalationMessage, sanitizeSubscriberId } = require('../utils/sanitize.util');
+const rateLimitService = require('../services/ratelimit.service');
 const Logger = require('../utils/logger.util');
+const { detectLanguage } = require('../utils/language.util');
+const { sanitizeText } = require('../utils/sanitize.util');
 
 /**
  * POST /webhook/vuelasim-bot
- * Webhook principal que recibe mensajes de ManyChat
- * Replica exactamente el flujo del workflow de n8n
+ * Webhook principal para recibir mensajes de ManyChat
  */
 router.post('/vuelasim-bot', async (req, res) => {
   const startTime = Date.now();
@@ -20,116 +19,133 @@ router.post('/vuelasim-bot', async (req, res) => {
   try {
     Logger.info('🔵 Webhook recibido', { body: req.body });
 
-    // 1. EXTRAER DATOS (nodo "Extraer" de n8n)
+    // 1. Extraer datos del body
     const body = req.body || {};
     let subscriberId = body.subscriber_id || body.key || 'unknown';
-    subscriberId = sanitizeSubscriberId(subscriberId);
-    
-    const mensaje = sanitizeText(body.last_input_text || body.text || '');
+    const mensaje = body.last_input_text || body.text || '';
     const nombre = body.first_name || 'viajero';
-    const phone = body.phone || body.whatsapp_phone || '';
+    const phone = body.phone || '';
 
-    if (!mensaje) {
-      Logger.warn('⚠️ Mensaje vacío recibido', { subscriberId });
-      return res.status(400).json({ error: 'Mensaje vacío' });
-    }
-
-    // 2. DETECCIÓN DE IDIOMA (función detectarIdioma de n8n)
-    const idioma = detectLanguage(mensaje);
-    const saludo = getContextualGreeting(idioma);
+    // Limpiar subscriber_id
+    subscriberId = String(subscriberId).replace(/^user:/, '').trim();
 
     Logger.info('📋 Datos extraídos', {
       subscriberId,
       nombre,
-      idioma,
+      idioma: detectLanguage(mensaje),
       mensajeLength: mensaje.length
     });
 
-    // 3. RATE LIMITING (nodo "If4" de n8n)
-    const rateLimitCheck = await rateLimitService.checkRateLimit(subscriberId);
-    
-    if (!rateLimitCheck.allowed) {
-      Logger.warn('🚫 Rate limit excedido', { 
-        subscriberId, 
-        count: rateLimitCheck.count 
+    // 2. Validar datos básicos
+    if (!subscriberId || !mensaje) {
+      return res.status(400).json({
+        status: 'error',
+        message: 'Faltan datos requeridos: subscriber_id y mensaje'
       });
+    }
 
-      const limitMessage = rateLimitService.getRateLimitMessage(idioma);
-      await manychatService.sendMessage(subscriberId, limitMessage);
-
-      return res.status(200).json({ 
+    // 3. Rate limiting (30 mensajes por día)
+    const rateLimitResult = await rateLimitService.checkRateLimit(subscriberId);
+    
+    if (!rateLimitResult.allowed) {
+      Logger.warn('⚠️ Rate limit excedido', { subscriberId });
+      
+      // Enviar mensaje de rate limit
+      await manychatService.sendMessage(
+        subscriberId,
+        'Has alcanzado el límite de mensajes por hoy. Por favor intenta mañana o contacta a hola@vuelasim.com'
+      );
+      
+      return res.status(200).json({
         status: 'rate_limited',
         message: 'Rate limit excedido'
       });
     }
 
-    Logger.info(`✅ Rate limit OK: ${rateLimitCheck.count}/${rateLimitService.maxMessages}`);
+    Logger.info('✅ Rate limit OK: ' + rateLimitResult.count + '/' + rateLimitResult.limit);
 
-    // 4. CLASIFICACIÓN (nodo "Clasificador" de n8n)
+    // 4. Detectar idioma
+    const idioma = detectLanguage(mensaje);
+    Logger.info('🔍 Clasificando mensaje...', { length: mensaje.length, language: idioma });
+
+    // 5. Clasificar mensaje
     const categoria = await classifierService.classify(mensaje, idioma);
-    Logger.info(`🎯 Categoría: ${categoria}`);
+    Logger.info('🎯 Categoría: ' + categoria);
 
-    // 5. EJECUTAR AGENTE SEGÚN CATEGORÍA (nodos Ventas/Soporte/Tecnico/Escalamiento)
-    const context = {
+    // 6. Ejecutar agente correspondiente
+    const respuesta = await agentsService.executeAgent(
+      categoria,
       subscriberId,
       nombre,
-      idioma,
-      saludo,
-      phone
-    };
+      mensaje,
+      idioma
+    );
 
-    const respuestaBot = await agentsService.executeAgent(categoria, mensaje, context);
-
-    // 6. NOTIFICAR ADMIN SI ES ESCALAMIENTO (nodo "Notificar?")
+    // 7. Si es escalamiento, notificar admin
     if (categoria === 'ESCALAMIENTO') {
-      const mensajeLimpio = sanitizeEscalationMessage(mensaje);
       await manychatService.notifyAdmin({
         subscriberId,
         nombre,
-        mensaje: mensajeLimpio,
+        mensaje,
         timestamp: new Date().toISOString()
       });
     }
 
-    // 7. ENVIAR RESPUESTA A MANYCHAT (nodo "Enviar")
-    const sendResult = await manychatService.sendMessage(subscriberId, respuestaBot);
-
-    if (!sendResult.success) {
-      Logger.error('Error enviando respuesta a ManyChat', sendResult);
+    // 8. Enviar respuesta a ManyChat
+    const result = await manychatService.sendMessage(subscriberId, respuesta);
+    
+    if (!result.success) {
+      Logger.error('Error enviando respuesta a ManyChat', result);
     }
 
-    // 8. GUARDAR ANALYTICS (nodo "Guardar Analytics")
-    const duracion = Date.now() - startTime;
-    await supabaseService.saveAnalytics({
+    // 9. Guardar analytics en Supabase (en background, no bloqueante)
+    supabaseService.saveAnalytics({
       subscriber_id: subscriberId,
       nombre_cliente: nombre,
       categoria: categoria,
-      mensaje_cliente: mensaje,
-      respuesta_bot: respuestaBot,
+      mensaje_cliente: sanitizeText(mensaje),
+      respuesta_bot: sanitizeText(respuesta),
       fue_escalado: categoria === 'ESCALAMIENTO',
-      duracion_ms: duracion,
+      duracion_ms: Date.now() - startTime,
       idioma: idioma
+    }).catch(err => {
+      Logger.error('Error guardando analytics:', err);
     });
 
+    // 10. Respuesta exitosa al webhook
     Logger.info('✅ Webhook procesado exitosamente', {
       subscriberId,
       categoria,
-      duracion: `${duracion}ms`
+      duracion: (Date.now() - startTime) + 'ms'
     });
 
-    // Responder a ManyChat
+    // Retornar JSON compatible con ManyChat (evitar error de json path)
     return res.status(200).json({
       status: 'success',
       categoria: categoria,
-      duracion_ms: duracion
+      duracion_ms: Date.now() - startTime,
+      content: {
+        messages: [
+          {
+            text: "Mensaje procesado correctamente"
+          }
+        ]
+      }
     });
 
   } catch (error) {
-    Logger.error('❌ Error procesando webhook:', error);
+    Logger.error('Error en webhook:', error);
     
     return res.status(500).json({
       status: 'error',
-      error: error.message
+      message: 'Error interno del servidor',
+      content: {
+        messages: [
+          {
+            text: "Error procesando mensaje"
+          }
+        ]
+      }
     });
   }
 });
