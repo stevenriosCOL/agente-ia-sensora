@@ -19,16 +19,14 @@ class RAGService {
 
       // 1. Generar embedding del query
       const embeddingResponse = await this.openai.embeddings.create({
-        model: 'text-embedding-3-small', // Modelo actualizado
+        model: 'text-embedding-3-small',
         input: query,
       });
 
       const queryEmbedding = embeddingResponse.data[0].embedding;
 
-      // 2. Buscar documentos similares en Supabase
-      const supabase = supabaseService.getClient();
-      
-      const { data, error } = await supabase.rpc('match_sensora_knowledge', {
+      // 2. Buscar documentos similares usando la función de Supabase
+      const { data, error } = await supabaseService.supabase.rpc('match_sensora_knowledge', {
         query_embedding: queryEmbedding,
         match_threshold: 0.7,
         match_count: topK
@@ -36,35 +34,34 @@ class RAGService {
 
       if (error) {
         Logger.error('Error en búsqueda RAG:', error);
-        return null;
+        return [];
       }
 
       if (!data || data.length === 0) {
         Logger.warn('No se encontraron documentos relevantes en RAG');
-        return null;
+        return [];
       }
 
-      // 3. Formatear contexto encontrado
-      const context = data
-        .map((doc, index) => `[Fuente ${index + 1}]\n${doc.content}`)
-        .join('\n\n---\n\n');
-
       Logger.info(`✅ RAG encontró ${data.length} documentos relevantes`);
-      
-      return context;
+      return data;
+
     } catch (error) {
       Logger.error('Error en RAG search:', error);
-      return null;
+      return [];
     }
   }
 
   /**
    * Formatea el contexto RAG para incluirlo en el prompt del agente
    */
-  formatContextForAgent(context) {
-    if (!context) {
-      return 'IMPORTANTE: No se encontró información específica en la base de conocimiento. Responde con conocimiento general de Sensora AI, pero para detalles técnicos específicos recomienda contactar a steven@getsensora.com';
+  formatContextForAgent(results) {
+    if (!results || results.length === 0) {
+      return 'IMPORTANTE: No se encontró información específica en la base de conocimiento. Responde con conocimiento general de Sensora AI, pero para detalles técnicos específicos recomienda contactar a info@getsensora.com';
     }
+
+    const context = results
+      .map((doc, index) => `[Fuente ${index + 1}]\n${doc.content}`)
+      .join('\n\n---\n\n');
 
     return `BASE DE CONOCIMIENTO OFICIAL DE SENSORA AI:
     

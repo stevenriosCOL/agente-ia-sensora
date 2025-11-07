@@ -6,7 +6,11 @@ const agentsService = require('../services/agents.service');
 const supabaseService = require('../services/supabase.service');
 const manychatService = require('../services/manychat.service');
 const { detectLanguage } = require('../utils/language.util');
-const { sanitizeInput } = require('../utils/sanitize.util');
+// Función simple de sanitización inline
+const sanitizeInput = (text) => {
+  if (!text) return '';
+  return String(text).trim().slice(0, 1000); // Max 1000 chars
+};
 const Logger = require('../utils/logger.util');
 
 /**
@@ -141,16 +145,16 @@ ${paymentResult.link}
 
         return res.json({ response });
       } else {
-        const response = `Disculpa, hubo un error generando tu link de pago. Por favor escríbeme a steven@getsensora.com y te ayudo directamente.`;
+        const response = `Disculpa, hubo un error generando tu link de pago. Por favor escríbeme a info@getsensora.com y te ayudo directamente.`;
         return res.json({ response });
       }
     }
 
     // 3. Rate limiting (solo para conversaciones normales)
-    const rateLimitResult = rateLimitService.checkLimit(subscriber_id);
+    const rateLimitResult = await rateLimitService.checkRateLimit(subscriber_id);
     
     if (!rateLimitResult.allowed) {
-      const limitMessage = `Has alcanzado el límite de ${rateLimitResult.limit} mensajes por día. Intenta mañana o escríbenos a steven@getsensora.com`;
+      const limitMessage = `Has alcanzado el límite de ${rateLimitResult.limit} mensajes por día. Intenta mañana o escríbenos a info@getsensora.com`;
       Logger.warn('❌ Rate limit excedido', { subscriber_id });
       return res.json({ response: limitMessage });
     }
@@ -207,7 +211,7 @@ ${paymentResult.link}
   } catch (error) {
     Logger.error('❌ Error en webhook:', error);
     return res.status(500).json({ 
-      response: 'Disculpa, tuve un problema técnico. Por favor escribe a steven@getsensora.com'
+      response: 'Disculpa, tuve un problema técnico. Por favor escribe a info@getsensora.com'
     });
   }
 });

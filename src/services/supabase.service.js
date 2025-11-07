@@ -16,7 +16,7 @@ class SupabaseService {
     );
   }
 
-  /**
+/**
    * Guardar conversación en analytics
    */
   async saveAnalytics(data) {
@@ -25,13 +25,13 @@ class SupabaseService {
         .from('sensora_analytics')
         .insert({
           timestamp: new Date().toISOString(),
-          subscriber_id: data.subscriberId,
-          nombre_cliente: data.nombre,
+          subscriber_id: data.subscriber_id,           // ✅ Con guion bajo
+          nombre_cliente: data.nombre_cliente,         // ✅ Nombre correcto
           categoria: data.categoria,
-          mensaje_cliente: data.mensaje,
-          respuesta_bot: data.respuesta,
-          fue_escalado: data.fueEscalado || false,
-          duracion_ms: data.duracionMs,
+          mensaje_cliente: data.mensaje_cliente,       // ✅ Nombre correcto
+          respuesta_bot: data.respuesta_bot,           // ✅ Nombre correcto
+          fue_escalado: data.fue_escalado || false,    // ✅ Con guion bajo
+          duracion_ms: data.duracion_ms,               // ✅ Con guion bajo
           idioma: data.idioma
         });
 
@@ -40,7 +40,7 @@ class SupabaseService {
         return false;
       }
 
-      Logger.info('✅ Analytics guardado', { subscriberId: data.subscriberId });
+      Logger.info('✅ Analytics guardado', { subscriber_id: data.subscriber_id });
       return true;
     } catch (error) {
       Logger.error('Error en saveAnalytics:', error);
