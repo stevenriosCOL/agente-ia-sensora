@@ -23,7 +23,7 @@ module.exports = {
 
   // ManyChat
   MANYCHAT_TOKEN: process.env.MANYCHAT_TOKEN,
-  MANYCHAT_API_URL: process.env.MANYCHAT_API_URL || 'https://api.manychat.com/fb/sending/sendContent',
+  MANYCHAT_API_URL: process.env.MANYCHAT_API_URL || 'https://api.manychat.com/whatsapp/sending/sendContent',
 
   // Admin
   ADMIN_SUBSCRIBER_ID: process.env.ADMIN_SUBSCRIBER_ID || '1263215068',
