@@ -151,9 +151,8 @@ ${linkPago}
 
 💡 El pago de $25 USD se descuenta si decides trabajar con nosotros.`;
 
-        // ✅ Usar las claves correctas que espera saveAnalytics
         await supabaseService.saveAnalytics({
-          subscriber_id,                // <-- ahora con guion bajo
+          subscriber_id,
           nombre_cliente: nombre,
           categoria: 'LINK_PAGO_GENERADO',
           mensaje_cliente: mensaje,
@@ -171,7 +170,6 @@ ${linkPago}
       } else {
         const response = `Disculpa, hubo un error generando tu link de pago. Por favor escríbeme a info@getsensora.com y te ayudo directamente.`;
 
-        // ✅ Igual aquí: nombres de campos correctos
         await supabaseService.saveAnalytics({
           subscriber_id,
           nombre_cliente: nombre,
@@ -189,9 +187,7 @@ ${linkPago}
           codigo_sesion: null
         });
       }
-
     }
-
 
     // 3. Rate limiting (solo para conversaciones normales)
     const rateLimitResult = await rateLimitService.checkRateLimit(subscriber_id);
@@ -206,21 +202,22 @@ ${linkPago}
     const idioma = detectLanguage(mensaje);
     Logger.info(`🌍 Idioma detectado: ${idioma}`);
 
-    // 5. Clasificar mensaje
-    const categoria = await classifierService.classify(mensaje, idioma);
-    Logger.info(`📂 Categoría: ${categoria}`);
+    // 5. Clasificar mensaje (INTENT + EMOTION)
+    const { intent, emotion } = await classifierService.classify(mensaje, idioma);
+    Logger.info(`📂 Clasificación`, { intent, emotion });
 
     // 6. Ejecutar agente correspondiente
     const respuesta = await agentsService.executeAgent(
-      categoria,
+      intent,
+      emotion,
       subscriber_id,
       nombre,
       mensaje,
       idioma
     );
 
-    // 7. Notificar admin si es escalamiento
-    const fueEscalado = categoria === 'ESCALAMIENTO';
+    // 7. Notificar admin si es escalamiento REAL
+    const fueEscalado = intent === 'ESCALAMIENTO';
     if (fueEscalado) {
       await manychatService.notifyAdmin({
         subscriberId: subscriber_id,
@@ -230,11 +227,11 @@ ${linkPago}
       });
     }
 
-    // 8. Guardar analytics
+    // 8. Guardar analytics (usamos intent como categoria)
     await supabaseService.saveAnalytics({
       subscriber_id,
       nombre_cliente: nombre,
-      categoria,
+      categoria: intent,
       mensaje_cliente: mensaje,
       respuesta_bot: respuesta,
       fue_escalado: fueEscalado,
@@ -245,7 +242,8 @@ ${linkPago}
     // 9. Responder
     Logger.info('✅ Respuesta generada', { 
       subscriber_id, 
-      categoria, 
+      intent, 
+      emotion,
       duracion: Date.now() - startTime 
     });
 
@@ -268,6 +266,7 @@ function detectPaidSessionIntent(mensaje) {
     'me interesa la de $25',
     'prefiero la pagada',
     'sí, quiero pagar',
+    'si, quiero pagar',
     'acepto la sesión de 25',
     'quiero agendar pagando'
   ];

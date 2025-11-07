@@ -13,14 +13,16 @@ class AgentsService {
   }
 
   /**
-   * Ejecuta el agente correspondiente según la categoría
+   * Ejecuta el agente correspondiente según:
+   * - intent (CONSULTA, DIAGNOSTICO, TECNICO, ESCALAMIENTO)
+   * - emotion (CALM, NEUTRAL, FRUSTRATED, ANGRY, SAD, CONFUSED)
    */
-  async executeAgent(category, subscriberId, nombre, mensaje, idioma) {
-    Logger.info(`🤖 Ejecutando agente: ${category}`, { subscriberId });
+  async executeAgent(intent, emotion, subscriberId, nombre, mensaje, idioma) {
+    Logger.info(`🤖 Ejecutando agente`, { intent, emotion, subscriberId });
 
     // ESCALAMIENTO no usa IA, retorna mensaje estático
-    if (category === 'ESCALAMIENTO') {
-      return this.getEscalationMessage(idioma);
+    if (intent === 'ESCALAMIENTO') {
+      return this.getEscalationMessage(idioma, emotion);
     }
 
     try {
@@ -35,12 +37,13 @@ class AgentsService {
       const saludo = getContextualGreeting(idioma);
 
       // 4. Construir el prompt del sistema según agente
-      const systemPrompt = this.getAgentSystemPrompt(category, {
+      const systemPrompt = this.getAgentSystemPrompt(intent, {
         idioma,
         nombre,
         saludo,
         subscriberId,
-        ragContext
+        ragContext,
+        emotion
       });
 
       // 5. Construir mensajes para OpenAI
@@ -51,12 +54,12 @@ class AgentsService {
       ];
 
       // 6. Llamar a GPT-4o con configuración específica del agente
-      const temperature = this.getAgentTemperature(category);
+      const temperature = this.getAgentTemperature(intent);
 
       const completion = await this.openai.chat.completions.create({
         model: config.OPENAI_MODEL_AGENT,
-        messages: messages,
-        temperature: temperature,
+        messages,
+        temperature,
         max_tokens: 500
       });
 
@@ -66,28 +69,32 @@ class AgentsService {
       memoryService.addMessage(subscriberId, 'user', mensaje);
       memoryService.addMessage(subscriberId, 'assistant', response);
 
-      Logger.info(`✅ Agente ${category} respondió`, { 
-        subscriberId, 
-        responseLength: response.length 
+      Logger.info(`✅ Agente respondió`, {
+        intent,
+        emotion,
+        subscriberId,
+        responseLength: response.length
       });
 
       return response;
 
     } catch (error) {
-      Logger.error(`Error ejecutando agente ${category}:`, error);
+      Logger.error(`Error ejecutando agente ${intent}:`, error);
       return this.getFallbackMessage(idioma);
     }
   }
 
   /**
    * Retorna el prompt del sistema según el agente
-   * EXACTAMENTE como en el JSON de n8n
    */
-getAgentSystemPrompt(category, context) {
-    const { idioma, nombre, saludo, subscriberId, ragContext } = context;
+  getAgentSystemPrompt(intent, context) {
+    const { idioma, nombre, saludo, subscriberId, ragContext, emotion } = context;
+
+    const emotionLine = `ESTADO EMOCIONAL DEL CLIENTE (estimado): ${emotion}. Ajusta el tono con empatía si es FRUSTRATED, ANGRY, SAD o CONFUSED.`;
 
     const prompts = {
       CONSULTA: `IDIOMA: ${idioma}
+${emotionLine}
 Si idioma='en' responde en INGLÉS. Si idioma='pt' responde en PORTUGUÉS. Si idioma='es' responde en ESPAÑOL.
 
 Soy el Agente de Consultas de Sensora AI, empresa especializada en automatización empresarial con IA para América Latina.
@@ -129,30 +136,9 @@ REGLAS CRÍTICAS:
 2. NUNCA invento información que no tenga
 3. Si el cliente pregunta detalles técnicos específicos → Sugiero hablar con agente técnico
 4. Si quiere analizar su caso específico → Sugiero diagnóstico gratuito (agente DIAGNOSTICO)
-5. Si pide hablar con humano → Conecto con ESCALAMIENTO
+5. Si pide hablar con humano → No respondo yo mismo; la intención será ESCALAMIENTO en otro paso
 6. NO uso comillas dobles, solo apostrofes simples
 7. Respuestas CORTAS: máximo 3-4 líneas
-
-FLUJO DE CONVERSACIÓN:
-
-SALUDO INICIAL:
-Si es primera vez → "Hola ${nombre}! Soy el asistente de Sensora AI. Te ayudo a entender cómo automatizar tu empresa con IA. ¿Qué te gustaría saber?"
-Si ya conversamos → Retomar contexto de memoria
-
-PREGUNTAS SOBRE QUÉ HACEMOS:
-"Automatizamos operaciones empresariales con IA: desde WhatsApp bots hasta integraciones entre CRM, hojas de cálculo y sistemas de pago. Trabajamos con fintech, e-commerce, salud y retail en LATAM."
-
-PREGUNTAS SOBRE PRECIOS:
-"Los proyectos van desde $1,500 para automatizaciones simples hasta $6,000 para sistemas complejos. Ofrecemos diagnóstico gratuito de 30 min donde analizamos tu caso y te damos cotización exacta. ¿Te gustaría agendarlo?"
-
-PREGUNTAS SOBRE CASOS:
-Mencionar 1-2 casos relevantes según su industria. Ejemplo:
-"En e-commerce automatizamos VuelaSIM: 85% de ventas por WhatsApp sin humanos, ahorro de 100+ hrs/mes. ¿Tu negocio es similar?"
-
-CUÁNDO DERIVAR:
-- Preguntas técnicas detalladas → "Te conecto con mi compañero técnico que te explica el stack a fondo"
-- Quiere analizar su caso → "Te paso con el agente de diagnóstico para analizar tu operación específica"
-- Pide hablar con humano → "Te conecto con el equipo para agendar una llamada"
 
 OBJETIVO: Generar confianza, responder dudas básicas y guiar hacia diagnóstico gratuito si muestra interés.
 
@@ -164,6 +150,7 @@ NO mezcles idiomas bajo ninguna circunstancia.
 Máximo 3-4 líneas de respuesta.`,
 
       DIAGNOSTICO: `IDIOMA: ${idioma}
+${emotionLine}
 Si idioma='en' responde en INGLÉS. Si idioma='pt' responde en PORTUGUÉS. Si idioma='es' responde en ESPAÑOL.
 
 Soy el Agente de Diagnóstico de Sensora AI. Califico leads y entiendo problemas empresariales.
@@ -219,6 +206,7 @@ NO mezcles idiomas.
 UNA pregunta por mensaje.`,
 
       TECNICO: `IDIOMA: ${idioma}
+${emotionLine}
 Si idioma='en' responde en INGLÉS. Si idioma='pt' responde en PORTUGUÉS. Si idioma='es' responde en ESPAÑOL.
 
 Soy el Agente Técnico de Sensora AI. Respondo preguntas sobre stack, arquitectura e integraciones.
@@ -247,45 +235,64 @@ Máximo 3-4 líneas.`,
       ESCALAMIENTO: `Este mensaje no se usa porque ESCALAMIENTO retorna mensaje estático.`
     };
 
-    return prompts[category] || prompts.CONSULTA;
+    return prompts[intent] || prompts.CONSULTA;
   }
 
   /**
-   * Retorna la temperatura según el agente
-   * Replicado de n8n: Ventas 0.7, Soporte 0.5, Tecnico 0.4
+   * Retorna la temperatura según el agente (por intent)
    */
-  getAgentTemperature(category) {
+  getAgentTemperature(intent) {
     const temperatures = {
-      VENTAS: 0.7,
-      SOPORTE: 0.5,
-      TECNICO: 0.4
+      CONSULTA: 0.6,
+      DIAGNOSTICO: 0.7,
+      TECNICO: 0.3
     };
 
-    return temperatures[category] || 0.5;
+    return temperatures[intent] || 0.5;
   }
 
   /**
    * Mensaje de escalamiento multiidioma
-   * Exacto del JSON de n8n
    */
-getEscalationMessage(language) {
-  const messages = {
-    es: `Entiendo que necesitas una atención más personalizada 🤝  
-Ya he notificado a nuestro equipo y uno de nuestros especialistas de *Sensora AI* te contactará directamente en este chat para ayudarte con tu caso.  
-Gracias por tu paciencia 💡`,
+  getEscalationMessage(language, emotion = 'NEUTRAL') {
+    const baseEs = `Entiendo que necesitas una atención más personalizada 🤝  
+Ya he notificado a nuestro equipo y uno de nuestros especialistas de *Sensora AI* te responderá directamente por este chat para ayudarte con tu caso.  
+Gracias por tu paciencia 💡`;
 
-    en: `I understand you need more personalized attention 🤝  
-I've notified our team and one of our *Sensora AI* specialists will contact you directly here to assist with your case.  
-Thank you for your patience 💡`,
+    const baseEn = `I understand you need more personalized attention 🤝  
+I've notified our team and one of our *Sensora AI* specialists will reply to you directly in this chat to help with your case.  
+Thank you for your patience 💡`;
 
-    pt: `Entendo que você precisa de um atendimento mais personalizado 🤝  
-Já avisei nossa equipe e um dos nossos especialistas da *Sensora AI* entrará em contato com você aqui mesmo para ajudar no seu caso.  
+    const basePt = `Entendo que você precisa de um atendimento mais personalizado 🤝  
+Já avisei nossa equipe e um dos nossos especialistas da *Sensora AI* vai responder diretamente aqui neste chat para ajudar com o seu caso.  
+Obrigado pela paciência 💡`;
+
+    // Si viene muy enojado/frustrado, añadimos un toque extra de empatía
+    const isAngry = emotion === 'ANGRY' || emotion === 'FRUSTRATED';
+
+    if (language === 'en') {
+      return isAngry
+        ? `I’m really sorry for the frustration this has caused you 🙏  
+I've already notified our team and one of our *Sensora AI* specialists will reply to you directly in this chat to help with your case as soon as possible.  
+Thank you for your patience 💡`
+        : baseEn;
+    }
+
+    if (language === 'pt') {
+      return isAngry
+        ? `Sinto muito pela frustração que isso está causando 🙏  
+Já avisei nossa equipe e um dos nossos especialistas da *Sensora AI* vai responder diretamente aqui neste chat para ajudar com o seu caso o mais rápido possível.  
 Obrigado pela paciência 💡`
-  };
+        : basePt;
+    }
 
-  return messages[language] || messages.es;
-}
-
+    // Español por defecto
+    return isAngry
+      ? `Lamento mucho la molestia que esto te ha causado 🙏  
+Ya avisé a nuestro equipo y uno de nuestros especialistas de *Sensora AI* te responderá directamente por este chat lo antes posible para ayudarte con tu caso.  
+Gracias por tu paciencia 💡`
+      : baseEs;
+  }
 
   /**
    * Mensaje de fallback en caso de error
